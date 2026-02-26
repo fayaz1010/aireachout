@@ -1,13 +1,19 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import {
+  Users, Search, UserPlus, Crown, Shield, Mail,
+  Calendar, Activity, MoreHorizontal, ChevronDown,
+  Trash2, Ban, CheckCircle, Edit2, Send,
+} from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Users, Search, Filter, UserPlus, Crown, Shield, Mail, Calendar, Activity } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 interface User {
   id: string
@@ -16,269 +22,306 @@ interface User {
   role: string
   currentPlan: string
   subscriptionStatus: string
-  emailUsage: number
-  smsUsage: number
-  voiceUsage: number
-  leadsUsage: number
-  apiUsage: number
+  monthlyEmailsSent: number
+  monthlyVoiceCallsMade: number
+  monthlyLeadsGenerated: number
   emailLimit: number | null
-  smsLimit: number | null
   voiceCallLimit: number | null
   leadsLimit: number | null
-  apiCallLimit: number | null
   createdAt: string
-  lastLoginAt: string | null
+}
+
+const PLAN_COLORS: Record<string, string> = {
+  TRIAL: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  STARTER: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  PROFESSIONAL: 'bg-violet-500/10 text-violet-400 border-violet-500/20',
+  ENTERPRISE: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
+  CUSTOM: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  TRIAL: 'bg-amber-500/10 text-amber-400',
+  ACTIVE: 'bg-emerald-500/10 text-emerald-400',
+  PAST_DUE: 'bg-red-500/10 text-red-400',
+  CANCELED: 'bg-white/5 text-muted-foreground',
+  UNPAID: 'bg-red-500/10 text-red-400',
+}
+
+const ROLE_COLORS: Record<string, string> = {
+  SUPER_ADMIN: 'bg-rose-500/10 text-rose-400',
+  ADMIN: 'bg-violet-500/10 text-violet-400',
+  USER: 'bg-white/5 text-muted-foreground',
+}
+
+function UsageMini({ used, limit, label }: { used: number; limit: number | null; label: string }) {
+  const pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0
+  const danger = pct > 85
+  return (
+    <div className="space-y-0.5">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-muted-foreground">{label}</span>
+        <span className={cn('text-[10px] font-medium', danger ? 'text-red-400' : 'text-muted-foreground')}>
+          {used.toLocaleString()}{limit ? `/${limit.toLocaleString()}` : ''}
+        </span>
+      </div>
+      {limit && (
+        <div className="h-1 w-full rounded-full bg-white/[0.05]">
+          <div
+            className={cn('h-1 rounded-full', danger ? 'bg-red-500' : 'bg-violet-500')}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function SuperAdminUsers() {
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [roleFilter, setRoleFilter] = useState('all')
+  const [search, setSearch] = useState('')
   const [planFilter, setPlanFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [actionMsg, setActionMsg] = useState<string | null>(null)
 
-  useEffect(() => {
-    fetchUsers()
-  }, [])
+  useEffect(() => { fetchUsers() }, [])
 
   const fetchUsers = async () => {
     try {
-      const response = await fetch('/api/super-admin/users')
-      if (!response.ok) throw new Error('Failed to fetch users')
-      const data = await response.json()
-      setUsers(data.users || [])
-      setLoading(false)
-    } catch (error) {
-      console.error('Error fetching users:', error)
+      const res = await fetch('/api/super-admin/users')
+      if (res.ok) {
+        const data = await res.json()
+        setUsers(data.users || [])
+      }
+    } finally {
       setLoading(false)
     }
   }
 
-  const filteredUsers = users.filter(user => {
-    const matchesSearch = user.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         user.email.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesRole = roleFilter === 'all' || user.role === roleFilter
-    const matchesPlan = planFilter === 'all' || user.currentPlan === planFilter
-    
-    return matchesSearch && matchesRole && matchesPlan
+  const updateUser = async (id: string, data: Record<string, any>, msg: string) => {
+    try {
+      const res = await fetch(`/api/super-admin/users/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      })
+      if (res.ok) {
+        setActionMsg(msg)
+        fetchUsers()
+        setTimeout(() => setActionMsg(null), 3000)
+      }
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  const filtered = users.filter((u) => {
+    const matchSearch = !search || u.name?.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase())
+    const matchPlan = planFilter === 'all' || u.currentPlan === planFilter
+    const matchStatus = statusFilter === 'all' || u.subscriptionStatus === statusFilter
+    return matchSearch && matchPlan && matchStatus
   })
 
-  const getRoleBadge = (role: string) => {
-    switch (role) {
-      case 'SUPER_ADMIN':
-        return <Badge variant="destructive" className="bg-red-600"><Shield className="w-3 h-3 mr-1" />Super Admin</Badge>
-      case 'ADMIN':
-        return <Badge variant="secondary" className="bg-purple-100 text-purple-800"><Crown className="w-3 h-3 mr-1" />Admin</Badge>
-      default:
-        return <Badge variant="outline">User</Badge>
-    }
-  }
-
-  const getPlanBadge = (plan: string) => {
-    const colors = {
-      FREE: 'bg-gray-100 text-gray-800',
-      STARTER: 'bg-blue-100 text-blue-800',
-      PROFESSIONAL: 'bg-green-100 text-green-800',
-      ENTERPRISE: 'bg-purple-100 text-purple-800'
-    }
-    return <Badge className={colors[plan as keyof typeof colors] || colors.FREE}>{plan}</Badge>
-  }
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'ACTIVE':
-        return <Badge className="bg-green-100 text-green-800">Active</Badge>
-      case 'INACTIVE':
-        return <Badge className="bg-gray-100 text-gray-800">Inactive</Badge>
-      case 'CANCELLED':
-        return <Badge className="bg-red-100 text-red-800">Cancelled</Badge>
-      default:
-        return <Badge variant="outline">{status}</Badge>
-    }
+  const stats = {
+    total: users.length,
+    active: users.filter((u) => u.subscriptionStatus === 'ACTIVE').length,
+    trial: users.filter((u) => u.subscriptionStatus === 'TRIAL').length,
+    enterprise: users.filter((u) => u.currentPlan === 'ENTERPRISE').length,
   }
 
   if (loading) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-        </div>
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="animate-spin h-6 w-6 rounded-full border-2 border-violet-500 border-t-transparent" />
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">User Management</h1>
-          <p className="text-gray-600">Manage platform users and their access</p>
+          <h2 className="text-lg font-semibold text-foreground">User Management</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">{users.length} total users across all plans</p>
         </div>
-        <Button>
-          <UserPlus className="w-4 h-4 mr-2" />
-          Add User
+        <Button size="sm" className="aurora-gradient text-white text-xs gap-1.5">
+          <UserPlus className="h-3.5 w-3.5" /> Invite User
         </Button>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Users</CardTitle>
-            <Users className="h-4 w-4 text-blue-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{users.length}</div>
-            <p className="text-xs text-muted-foreground">All registered users</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Subscriptions</CardTitle>
-            <Activity className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {users.filter(u => u.subscriptionStatus === 'ACTIVE').length}
+      {/* Stats */}
+      <div className="grid grid-cols-4 gap-3">
+        {[
+          { label: 'Total', value: stats.total, icon: Users, color: 'text-violet-400' },
+          { label: 'Active', value: stats.active, icon: CheckCircle, color: 'text-emerald-400' },
+          { label: 'In Trial', value: stats.trial, icon: Activity, color: 'text-amber-400' },
+          { label: 'Enterprise', value: stats.enterprise, icon: Crown, color: 'text-rose-400' },
+        ].map(({ label, value, icon: Icon, color }) => (
+          <div key={label} className="glass-card rounded-xl p-4 border border-white/[0.06]">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">{label}</span>
+              <Icon className={cn('h-4 w-4', color)} />
             </div>
-            <p className="text-xs text-muted-foreground">Paying customers</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Enterprise Users</CardTitle>
-            <Crown className="h-4 w-4 text-purple-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {users.filter(u => u.currentPlan === 'ENTERPRISE').length}
-            </div>
-            <p className="text-xs text-muted-foreground">Highest tier</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">New This Month</CardTitle>
-            <Calendar className="h-4 w-4 text-orange-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {users.filter(u => {
-                const createdDate = new Date(u.createdAt)
-                const now = new Date()
-                return createdDate.getMonth() === now.getMonth() && 
-                       createdDate.getFullYear() === now.getFullYear()
-              }).length}
-            </div>
-            <p className="text-xs text-muted-foreground">Recent signups</p>
-          </CardContent>
-        </Card>
+            <div className="text-2xl font-bold text-foreground mt-1">{value}</div>
+          </div>
+        ))}
       </div>
 
+      {actionMsg && (
+        <div className="flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+          <CheckCircle className="h-4 w-4" /> {actionMsg}
+        </div>
+      )}
+
       {/* Filters */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Filters</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-4">
-            <div className="flex-1 min-w-[200px]">
-              <div className="relative">
-                <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                <Input
-                  placeholder="Search users..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-            </div>
-            
-            <Select value={roleFilter} onValueChange={setRoleFilter}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="Role" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Roles</SelectItem>
-                <SelectItem value="USER">User</SelectItem>
-                <SelectItem value="ADMIN">Admin</SelectItem>
-                <SelectItem value="SUPER_ADMIN">Super Admin</SelectItem>
-              </SelectContent>
-            </Select>
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            placeholder="Search by name or email..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9 h-8 text-xs bg-white/[0.03] border-white/10"
+          />
+        </div>
+        <select
+          value={planFilter}
+          onChange={(e) => setPlanFilter(e.target.value)}
+          className="h-8 rounded-md border border-white/10 bg-white/[0.03] px-3 text-xs text-foreground"
+        >
+          <option value="all">All Plans</option>
+          <option value="TRIAL">Trial</option>
+          <option value="STARTER">Starter</option>
+          <option value="PROFESSIONAL">Professional</option>
+          <option value="ENTERPRISE">Enterprise</option>
+        </select>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="h-8 rounded-md border border-white/10 bg-white/[0.03] px-3 text-xs text-foreground"
+        >
+          <option value="all">All Status</option>
+          <option value="ACTIVE">Active</option>
+          <option value="TRIAL">Trial</option>
+          <option value="PAST_DUE">Past Due</option>
+          <option value="CANCELED">Canceled</option>
+        </select>
+      </div>
 
-            <Select value={planFilter} onValueChange={setPlanFilter}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="Plan" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Plans</SelectItem>
-                <SelectItem value="FREE">Free</SelectItem>
-                <SelectItem value="STARTER">Starter</SelectItem>
-                <SelectItem value="PROFESSIONAL">Professional</SelectItem>
-                <SelectItem value="ENTERPRISE">Enterprise</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Users Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Users ({filteredUsers.length})</CardTitle>
-          <CardDescription>Manage user accounts and permissions</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {filteredUsers.map((user) => (
-              <div key={user.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
-                <div className="flex items-center space-x-4">
-                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                    <span className="text-blue-600 font-semibold">
-                      {user.name ? user.name.charAt(0).toUpperCase() : user.email.charAt(0).toUpperCase()}
-                    </span>
-                  </div>
-                  <div>
-                    <div className="flex items-center space-x-2">
-                      <p className="font-medium">{user.name || 'No Name'}</p>
-                      {getRoleBadge(user.role)}
-                    </div>
-                    <p className="text-sm text-gray-500">{user.email}</p>
-                    <p className="text-xs text-gray-400">
-                      Joined {new Date(user.createdAt).toLocaleDateString()}
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="flex items-center space-x-4">
-                  <div className="text-right">
-                    <div className="flex items-center space-x-2">
-                      {getPlanBadge(user.currentPlan)}
-                      {getStatusBadge(user.subscriptionStatus)}
-                    </div>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Usage: {user.emailUsage || 0} emails, {user.smsUsage || 0} SMS
-                    </p>
-                  </div>
-                  
-                  <Button variant="outline" size="sm">
-                    View Details
-                  </Button>
-                </div>
-              </div>
-            ))}
-            
-            {filteredUsers.length === 0 && (
-              <div className="text-center py-8 text-gray-500">
-                No users found matching your filters.
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+      {/* Table */}
+      <div className="glass-card rounded-xl border border-white/[0.06] overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-white/[0.06]">
+                {['User', 'Plan', 'Status', 'Usage', 'Joined', 'Actions'].map((h) => (
+                  <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                    No users found
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((user) => (
+                  <tr key={user.id} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="h-8 w-8 rounded-full aurora-gradient flex items-center justify-center text-white text-xs font-bold shrink-0">
+                          {(user.name || user.email)[0].toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="text-sm font-medium text-foreground">{user.name || '(no name)'}</div>
+                          <div className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Mail className="h-2.5 w-2.5" /> {user.email}
+                          </div>
+                          {user.role !== 'USER' && (
+                            <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full mt-0.5 inline-flex items-center gap-1', ROLE_COLORS[user.role])}>
+                              {user.role === 'SUPER_ADMIN' ? <Shield className="h-2.5 w-2.5" /> : <Crown className="h-2.5 w-2.5" />}
+                              {user.role.replace('_', ' ')}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={cn('text-xs px-2 py-0.5 rounded-full border', PLAN_COLORS[user.currentPlan] || 'bg-white/5 text-muted-foreground border-white/10')}>
+                        {user.currentPlan}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={cn('text-xs px-2 py-0.5 rounded-full', STATUS_COLORS[user.subscriptionStatus] || 'bg-white/5 text-muted-foreground')}>
+                        {user.subscriptionStatus}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 min-w-[140px]">
+                      <div className="space-y-1.5">
+                        <UsageMini used={user.monthlyEmailsSent} limit={user.emailLimit} label="Emails" />
+                        <UsageMini used={user.monthlyLeadsGenerated} limit={user.leadsLimit} label="Leads" />
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <Calendar className="h-3 w-3" />
+                        {new Date(user.createdAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: '2-digit' })}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button className="p-1.5 rounded-md hover:bg-white/[0.05] text-muted-foreground hover:text-foreground transition-colors">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="bg-aurora-surface border-white/10 text-sm w-44">
+                          <DropdownMenuItem
+                            className="text-xs gap-2 cursor-pointer"
+                            onClick={() => updateUser(user.id, { currentPlan: 'ENTERPRISE', subscriptionStatus: 'ACTIVE' }, `${user.name || user.email} upgraded to Enterprise`)}
+                          >
+                            <Crown className="h-3.5 w-3.5 text-rose-400" /> Upgrade to Enterprise
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="text-xs gap-2 cursor-pointer"
+                            onClick={() => updateUser(user.id, { currentPlan: 'TRIAL', subscriptionStatus: 'TRIAL' }, `${user.name || user.email} moved to Trial`)}
+                          >
+                            <Activity className="h-3.5 w-3.5 text-amber-400" /> Move to Trial
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator className="bg-white/[0.06]" />
+                          <DropdownMenuItem
+                            className="text-xs gap-2 cursor-pointer"
+                            onClick={() => updateUser(user.id, { role: 'ADMIN' }, `${user.name || user.email} made Admin`)}
+                          >
+                            <Shield className="h-3.5 w-3.5 text-violet-400" /> Make Admin
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="text-xs gap-2 cursor-pointer"
+                            onClick={() => updateUser(user.id, { role: 'USER' }, `${user.name || user.email} set to User`)}
+                          >
+                            <Edit2 className="h-3.5 w-3.5" /> Set as User
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator className="bg-white/[0.06]" />
+                          <DropdownMenuItem
+                            className="text-xs gap-2 cursor-pointer text-red-400 focus:text-red-400"
+                            onClick={() => updateUser(user.id, { subscriptionStatus: 'CANCELED' }, `${user.name || user.email} subscription canceled`)}
+                          >
+                            <Ban className="h-3.5 w-3.5" /> Cancel Subscription
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   )
 }
