@@ -1,0 +1,1155 @@
+// This is your Prisma schema file for Lead Generation & Email Outreach Platform.
+// Learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+    provider      = "prisma-client-js"
+    binaryTargets = ["native"]
+}
+
+datasource db {
+    provider  = "postgresql"
+    url       = env("DATABASE_URL")
+    directUrl = env("DIRECT_URL")
+}
+
+// Authentication models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  password      String
+  emailVerified DateTime?
+  image         String?
+  firstName     String?
+  lastName      String?
+  companyName   String?
+  role          UserRole  @default(USER)
+  
+  // Subscription & Billing
+  stripeCustomerId String? @unique
+  subscriptionId   String? @unique
+  subscriptionStatus SubscriptionStatus @default(TRIAL)
+  currentPlan      PricingPlan @default(TRIAL)
+  trialEndsAt      DateTime?
+  subscriptionEndsAt DateTime?
+  
+  // Usage tracking
+  monthlyEmailsSent     Int @default(0)
+  monthlySmsSent        Int @default(0)
+  monthlyVoiceCallsMade Int @default(0)
+  monthlyApiCalls       Int @default(0)
+  monthlyLeadsGenerated Int @default(0)
+  
+  // Usage limits (null means unlimited for super admin)
+  emailLimit            Int?
+  smsLimit              Int?
+  voiceCallLimit        Int?
+  apiCallLimit          Int?
+  leadsLimit            Int?
+  
+  // Reset tracking
+  usageResetAt          DateTime @default(now())
+
+  // Contact Center agent fields
+  employeeId          String?
+  availabilityStatus  String?  @default("OFFLINE")
+  department          String?
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts     Account[]
+  sessions     Session[]
+  projects     Project[]
+  campaigns    Campaign[]
+  emailHistory EmailHistory[]
+  unsubscribes Unsubscribe[]
+  apiKeys      ApiKey[]
+  socialMediaAccounts SocialMediaAccount[]
+  usageLogs    UsageLog[]
+  billingHistory BillingHistory[]
+  invoices     Invoice[]
+  blogPosts    BlogPost[]
+  projectAnalyses ProjectAnalysis[]
+
+  @@map("users")
+}
+
+model ApiKey {
+  id           String   @id @default(cuid())
+  userId       String
+  service      ApiService
+  keyName      String   // Display name for the key
+  encryptedKey String   // Encrypted API key
+  isActive     Boolean  @default(true)
+  lastUsed     DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, service])
+  @@map("api_keys")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// Super Admin & Platform Configuration Models
+model SuperAdminApiKey {
+  id            String     @id @default(cuid())
+  service       ApiService
+  keyName       String     // Display name for the key
+  encryptedKey  String     // Encrypted API key
+  isActive      Boolean    @default(true)
+  costPerUse    Decimal?   // Cost per API call in cents
+  markup        Decimal    @default(0.20) // 20% default markup
+  
+  // Rate limiting
+  dailyLimit    Int?       // Daily usage limit
+  monthlyLimit  Int?       // Monthly usage limit
+  
+  // Usage tracking
+  totalUsage    Int        @default(0)
+  monthlyUsage  Int        @default(0)
+  dailyUsage    Int        @default(0)
+  lastUsed      DateTime?
+  usageResetAt  DateTime   @default(now())
+  
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  usageLogs     UsageLog[]
+
+  @@unique([service])
+  @@map("super_admin_api_keys")
+}
+
+// Usage Tracking & Billing Models
+model UsageLog {
+  id              String    @id @default(cuid())
+  
+  // Usage details
+  service         ApiService
+  operation       String    // e.g., "email_sent", "sms_sent", "voice_call", "lead_generation"
+  quantity        Int       @default(1)
+  cost            Decimal?  // Cost in cents
+  
+  // User or system tracking
+  userId          String?   // null for super admin usage
+  user            User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  superAdminApiKeyId String?
+  superAdminApiKey   SuperAdminApiKey? @relation(fields: [superAdminApiKeyId], references: [id], onDelete: SetNull)
+  
+  // Request metadata
+  requestData     Json?     // Additional request information
+  responseData    Json?     // Response information
+  
+  // Billing
+  billable        Boolean   @default(true)
+  billingStatus   BillingStatus @default(PENDING)
+  billedAt        DateTime?
+  invoiceId       String?
+  invoice         Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  
+  createdAt       DateTime  @default(now())
+  
+  @@map("usage_logs")
+}
+
+model Invoice {
+  id                String        @id @default(cuid())
+  invoiceNumber     String        @unique
+  
+  // Customer information
+  userId            String
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Invoice details
+  status            InvoiceStatus @default(DRAFT)
+  subtotal          Decimal       // Amount before tax
+  tax               Decimal       @default(0)
+  total             Decimal       // Final amount
+  currency          String        @default("USD")
+  
+  // Billing period
+  billingPeriodStart DateTime
+  billingPeriodEnd   DateTime
+  
+  // Stripe integration
+  stripeInvoiceId   String?       @unique
+  stripePaymentIntentId String?   @unique
+  
+  // Payment tracking
+  paidAt            DateTime?
+  dueAt             DateTime
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  usageLogs         UsageLog[]
+  billingHistory    BillingHistory[]
+  
+  @@map("invoices")
+}
+
+model BillingHistory {
+  id              String    @id @default(cuid())
+  
+  // Transaction details
+  type            BillingType
+  description     String
+  amount          Decimal   // Amount in cents
+  currency        String    @default("USD")
+  
+  // References
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  invoiceId       String?
+  invoice         Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  
+  // Payment processing
+  stripeEventId   String?   @unique
+  stripeData      Json?     // Stripe event data
+  
+  // Status
+  status          PaymentStatus @default(PENDING)
+  processedAt     DateTime?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@map("billing_history")
+}
+
+// Subscription & Pricing Models
+model PricingTier {
+  id              String    @id @default(cuid())
+  name            String    // e.g., "Starter", "Professional", "Enterprise"
+  plan            PricingPlan @unique
+  
+  // Pricing
+  monthlyPrice    Decimal
+  yearlyPrice     Decimal?
+  stripePriceId   String?   @unique
+  stripeYearlyPriceId String? @unique
+  
+  // Limits
+  emailLimit      Int
+  smsLimit        Int
+  voiceCallLimit  Int
+  leadsLimit      Int
+  projectLimit    Int
+  campaignLimit   Int
+  
+  // Features
+  features        String[]  // Array of feature names
+  aiPersonalization Boolean @default(true)
+  multiChannel    Boolean   @default(true)
+  analytics       Boolean   @default(true)
+  apiAccess       Boolean   @default(false)
+  prioritySupport Boolean   @default(false)
+  
+  // Display
+  description     String?
+  isPopular       Boolean   @default(false)
+  isActive        Boolean   @default(true)
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@map("pricing_tiers")
+}
+
+// Lead Generation & Email Outreach models
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  website     String?
+  industry    String?
+  targetAudience String?
+  keywords    String[] // Array of keywords for lead generation
+  status      ProjectStatus @default(ACTIVE)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  leads       Lead[]
+  campaigns   Campaign[]
+
+  @@map("projects")
+}
+
+
+
+model Campaign {
+  id            String   @id @default(cuid())
+  name          String
+  
+  // Multi-channel campaign settings
+  campaignType     CampaignType @default(EMAIL)
+  communicationChannels CommunicationChannel[] // Multiple channels per campaign
+  
+  // Email-specific fields
+  subject       String?
+  emailTemplate String?   @db.Text
+  
+  // Social media fields
+  socialMediaContent String? @db.Text
+  socialMediaPlatforms SocialPlatform[] // Platforms to post to
+  
+  // SMS fields
+  smsContent    String?
+  
+  // Voice call fields
+  voiceScript   String?   @db.Text
+  voiceType     VoiceType @default(AI) // AI or Human
+  
+  // Campaign settings
+  status        CampaignStatus @default(DRAFT)
+  scheduledAt   DateTime?
+  sentAt        DateTime?
+  
+  // Personalization settings
+  useAiPersonalization Boolean @default(true)
+  personalizationPrompt String? @db.Text
+  
+  // Campaign targeting
+  targetLeadIds String[] // Specific lead IDs to target
+  targetTags    String[] // Target leads with these tags
+  targetCriteria Json?   // Additional targeting criteria
+  
+  // Multi-channel statistics
+  totalRecipients Int      @default(0)
+  emailsSent      Int      @default(0)
+  emailsDelivered Int      @default(0)
+  emailsOpened    Int      @default(0)
+  emailsClicked   Int      @default(0)
+  emailsBounced   Int      @default(0)
+  smsSent         Int      @default(0)
+  smsDelivered    Int      @default(0)
+  socialPostsCreated Int   @default(0)
+  socialPostsPublished Int @default(0)
+  voiceCallsMade  Int      @default(0)
+  voiceCallsConnected Int  @default(0)
+  unsubscribes    Int      @default(0)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  emailHistory     EmailHistory[]
+  socialMediaPosts SocialMediaPost[]
+  smsHistory       SmsHistory[]
+  voiceCallHistory VoiceCallHistory[]
+
+  @@map("campaigns")
+}
+
+model EmailHistory {
+  id              String   @id @default(cuid())
+  
+  // Email details
+  subject         String
+  content         String   @db.Text
+  recipientEmail  String
+  recipientName   String?
+  
+  // Email status
+  status          EmailStatus @default(SENT)
+  sentAt          DateTime @default(now())
+  deliveredAt     DateTime?
+  openedAt        DateTime?
+  clickedAt       DateTime?
+  bouncedAt       DateTime?
+  
+  // Tracking
+  openCount       Int      @default(0)
+  clickCount      Int      @default(0)
+  unsubscribeToken String? @unique // Token for unsubscribe tracking
+  
+  // Error handling
+  errorMessage    String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relationships
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  leadId          String
+  lead            Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  
+  campaignId      String?
+  campaign        Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@map("email_history")
+}
+
+model Unsubscribe {
+  id              String   @id @default(cuid())
+  email           String
+  reason          String?
+  unsubscribedAt  DateTime @default(now())
+  
+  // Tracking information
+  ipAddress       String?
+  userAgent       String?
+  
+  // Relationships
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  leadId          String?
+  lead            Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  
+  @@unique([email, userId]) // One unsubscribe record per email per user
+  @@map("unsubscribes")
+}
+
+// Social Media & Multi-Channel Models
+model SocialMediaAccount {
+  id              String    @id @default(cuid())
+  platform        SocialPlatform
+  accountName     String    // Display name/username
+  accountId       String?   // Platform-specific account ID
+  accessToken     String    @db.Text // Encrypted access token
+  refreshToken    String?   @db.Text // Encrypted refresh token
+  tokenExpiresAt  DateTime?
+  isActive        Boolean   @default(true)
+  
+  // Account metadata
+  followerCount   Int?
+  profileUrl      String?
+  accountType     String?   // business, personal, creator
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  socialMediaPosts SocialMediaPost[]
+  
+  @@unique([userId, platform, accountName])
+  @@map("social_media_accounts")
+}
+
+model SocialMediaPost {
+  id              String    @id @default(cuid())
+  platform        SocialPlatform
+  content         String    @db.Text
+  mediaUrls       String[]  // Array of media URLs (images, videos)
+  hashtags        String[]  // Array of hashtags
+  
+  // Post settings
+  status          PostStatus @default(DRAFT)
+  scheduledAt     DateTime?
+  publishedAt     DateTime?
+  
+  // Platform-specific data
+  platformPostId  String?   // ID returned by the platform
+  platformData    Json?     // Additional platform-specific metadata
+  
+  // Engagement metrics
+  likes           Int       @default(0)
+  comments        Int       @default(0)
+  shares          Int       @default(0)
+  views           Int       @default(0)
+  reach           Int       @default(0)
+  
+  // AI-generated insights
+  aiInsights      Json?     // AI analysis of post performance
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  campaignId      String?
+  campaign        Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  
+  socialMediaAccountId String
+  socialMediaAccount   SocialMediaAccount @relation(fields: [socialMediaAccountId], references: [id], onDelete: Cascade)
+  
+  @@map("social_media_posts")
+}
+
+model SmsHistory {
+  id              String    @id @default(cuid())
+  
+  // SMS details
+  content         String    @db.Text
+  recipientPhone  String
+  recipientName   String?
+  
+  // SMS status
+  status          SmsStatus @default(SENT)
+  sentAt          DateTime  @default(now())
+  deliveredAt     DateTime?
+  
+  // Tracking
+  messageId       String?   // Provider message ID
+  cost            Decimal?  // Cost in cents
+  
+  // Error handling
+  errorMessage    String?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  campaignId      String
+  campaign        Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  
+  leadId          String
+  lead            Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  
+  @@map("sms_history")
+}
+
+model VoiceCallHistory {
+  id              String    @id @default(cuid())
+  
+  // Call details
+  recipientPhone  String
+  recipientName   String?
+  script          String?   @db.Text
+  voiceType       VoiceType
+  
+  // External service tracking
+  externalCallId  String?   // Vapi or Twilio call ID
+  serviceProvider String?   // 'VAPI', 'TWILIO', etc.
+  
+  // Call status
+  status          CallStatus @default(INITIATED)
+  initiatedAt     DateTime   @default(now())
+  connectedAt     DateTime?
+  endedAt         DateTime?
+  duration        Int?       // Duration in seconds
+  
+  // Call tracking
+  callId          String?    // Provider call ID
+  recordingUrl    String?    // Recording URL if available
+  cost            Decimal?   // Cost in cents
+  
+  // Call outcome
+  outcome         CallOutcome? // How the call ended
+  notes           String?      // Manual notes about the call
+  followUpNeeded  Boolean      @default(false)
+  
+  // Error handling
+  errorMessage    String?
+  
+  // AI analysis
+  transcription   String?    @db.Text // AI transcription of the call
+  sentimentScore  Float?     // AI sentiment analysis (-1 to 1)
+  aiInsights      Json?      // AI-generated insights about the call
+  
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  
+  campaignId      String
+  campaign        Campaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  
+  leadId          String
+  lead            Lead       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  
+  @@map("voice_call_history")
+}
+
+// Update Lead model to include new relationships
+model Lead {
+  id            String   @id @default(cuid())
+  email         String
+  firstName     String?
+  lastName      String?
+  fullName      String?
+  companyName   String?
+  jobTitle      String?
+  linkedinUrl   String?
+  website       String?
+  phone         String?
+  location      String?
+  industry      String?
+  companySize   String?
+  
+  // AI Analysis fields
+  aiInsights    Json?    // Stores AI-generated insights about the lead
+  personalizationData Json? // Stores data for email personalization
+  leadScore     Int?     // AI-generated lead scoring (1-100)
+  
+  // Lead source tracking
+  source        LeadSource @default(MANUAL)
+  sourceDetails String? // Additional source information
+  
+  // Lead status
+  status        LeadStatus @default(NEW)
+  tags          String[] // Array of tags for categorization
+  
+  // Multi-channel engagement tracking
+  emailsSent    Int      @default(0)
+  emailsOpened  Int      @default(0)
+  emailsClicked Int      @default(0)
+  smsSent       Int      @default(0)
+  smsReplied    Int      @default(0)
+  voiceCallsMade Int     @default(0)
+  voiceCallsConnected Int @default(0)
+  socialInteractions Int @default(0)
+  lastContacted DateTime?
+  
+  // Communication preferences
+  preferredChannel CommunicationChannel? // Lead's preferred communication method
+  doNotCall        Boolean @default(false)
+  doNotText        Boolean @default(false)
+  doNotEmail       Boolean @default(false)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  emailHistory     EmailHistory[]
+  smsHistory       SmsHistory[]
+  voiceCallHistory VoiceCallHistory[]
+  unsubscribes     Unsubscribe[]
+
+  @@unique([email, projectId]) // Prevent duplicate emails per project
+  @@map("leads")
+}
+
+// Blog Models
+model BlogPost {
+  id            String      @id @default(cuid())
+  title         String
+  slug          String      @unique
+  excerpt       String?     @db.Text
+  content       String      @db.Text
+  featuredImage String?
+  
+  // SEO fields
+  metaTitle     String?
+  metaDescription String?
+  
+  // Status and visibility
+  status        BlogPostStatus @default(DRAFT)
+  publishedAt   DateTime?
+  
+  // Author information
+  authorId      String
+  author        User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  
+  // Engagement metrics
+  viewCount     Int         @default(0)
+  readTime      Int?        // Estimated read time in minutes
+  
+  // Categories and tags
+  category      String?
+  tags          String[]    // Array of tags
+  
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  
+  @@map("blog_posts")
+}
+
+// Enums
+enum BlogPostStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ApiService {
+  GEMINI
+  GOOGLE_SEARCH
+  APIFY
+  PERPLEXITY
+  ELEVENLABS
+  VAPI
+  SENDGRID
+  TWILIO
+  FACEBOOK
+  INSTAGRAM
+  LINKEDIN
+  TWITTER
+  TIKTOK
+  YOUTUBE
+  STRIPE
+}
+
+enum ProjectStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum LeadSource {
+  MANUAL
+  GOOGLE_SEARCH
+  APIFY_SCRAPER
+  LINKEDIN_SCRAPER
+  CSV_IMPORT
+  API_IMPORT
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  RESPONDED
+  QUALIFIED
+  CONVERTED
+  UNSUBSCRIBED
+  BOUNCED
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  SENDING
+  SENT
+  PAUSED
+  CANCELLED
+}
+
+enum EmailStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  OPENED
+  CLICKED
+  BOUNCED
+  FAILED
+}
+
+enum CampaignType {
+  EMAIL
+  SOCIAL_MEDIA
+  SMS
+  VOICE_CALL
+  MULTI_CHANNEL
+}
+
+enum CommunicationChannel {
+  EMAIL
+  FACEBOOK
+  INSTAGRAM
+  LINKEDIN
+  TWITTER
+  TIKTOK
+  YOUTUBE
+  SMS
+  VOICE_CALL
+}
+
+enum SocialPlatform {
+  FACEBOOK
+  INSTAGRAM
+  LINKEDIN
+  TWITTER
+  TIKTOK
+  YOUTUBE
+}
+
+enum PostStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  FAILED
+  ARCHIVED
+}
+
+enum VoiceType {
+  AI
+  HUMAN
+}
+
+enum SmsStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+  UNDELIVERED
+}
+
+enum CallStatus {
+  INITIATED
+  RINGING
+  CONNECTED
+  COMPLETED
+  FAILED
+  NO_ANSWER
+  BUSY
+  CANCELLED
+}
+
+enum CallOutcome {
+  ANSWERED
+  NO_ANSWER
+  VOICEMAIL
+  BUSY
+  FAILED
+  INTERESTED
+  NOT_INTERESTED
+  CALLBACK_REQUESTED
+  MEETING_SCHEDULED
+}
+
+// SaaS & Billing Enums
+enum UserRole {
+  USER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+  INCOMPLETE
+  INCOMPLETE_EXPIRED
+}
+
+enum PricingPlan {
+  TRIAL
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+  CUSTOM
+}
+
+enum BillingStatus {
+  PENDING
+  BILLED
+  REFUNDED
+  DISPUTED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  VOID
+  UNCOLLECTIBLE
+}
+
+enum BillingType {
+  SUBSCRIPTION
+  USAGE_CHARGE
+  REFUND
+  CREDIT
+  ONE_TIME_PAYMENT
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELED
+  PROCESSING
+  REQUIRES_ACTION
+  REQUIRES_CAPTURE
+  REQUIRES_CONFIRMATION
+  REQUIRES_PAYMENT_METHOD
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONTACT CENTER MODELS
+// Merged from Central Contact Center App
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Customer {
+  id          String   @id @default(cuid())
+  userId      String
+  leadId      String?  @unique
+
+  // Identity
+  name        String
+  email       String?
+  phone       String?
+  whatsapp    String?
+  telegram    String?
+  viber       String?
+
+  // Profile
+  company     String?
+  language    String   @default("en")
+  timezone    String?
+  notes       String?  @db.Text
+  tags        String[]
+
+  // Lifecycle
+  isVip       Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  conversations Conversation[]
+
+  @@map("customers")
+}
+
+model Conversation {
+  id         String   @id @default(cuid())
+  userId     String
+
+  // Participants
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+
+  // Outreach integration bridge
+  campaignId String?
+  leadId     String?
+
+  // Channel
+  channel    CCChannel
+  externalId String?
+
+  // Status
+  status     ConversationStatus @default(OPEN)
+  source     ConversationSource @default(DIRECT)
+
+  // Assignment
+  assignedAgentId String?
+
+  // Metadata
+  subject    String?
+  isBot      Boolean  @default(false)
+  sentiment  Sentiment?
+  priority   CCPriority @default(MEDIUM)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  messages   Message[]
+
+  @@map("conversations")
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  content        String   @db.Text
+  direction      MessageDirection
+  channel        CCChannel
+
+  // Sender
+  senderType     SenderType
+  senderId       String?
+  senderName     String?
+
+  // Status
+  status         MessageStatus @default(SENT)
+  readAt         DateTime?
+  deliveredAt    DateTime?
+
+  // AI
+  isAiGenerated  Boolean  @default(false)
+  aiModel        String?
+
+  // Attachments
+  attachments    Json?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("messages")
+}
+
+model Ticket {
+  id          String   @id @default(cuid())
+  userId      String
+  number      Int
+  title       String
+  description String?  @db.Text
+  status      TicketStatus @default(OPEN)
+  priority    CCPriority @default(MEDIUM)
+  category    String?
+
+  customerId  String?
+  assigneeId  String?
+  conversationId String?
+
+  resolvedAt  DateTime?
+  closedAt    DateTime?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  comments    TicketComment[]
+
+  @@map("tickets")
+}
+
+model TicketComment {
+  id        String   @id @default(cuid())
+  ticketId  String
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorId  String
+  content   String   @db.Text
+  isInternal Boolean @default(false)
+  createdAt DateTime @default(now())
+
+  @@map("ticket_comments")
+}
+
+model KnowledgeArticle {
+  id          String   @id @default(cuid())
+  userId      String
+  title       String
+  content     String   @db.Text
+  excerpt     String?
+  category    String?
+  tags        String[]
+  status      ArticleStatus @default(DRAFT)
+  views       Int      @default(0)
+  readTimeMin Int      @default(5)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("knowledge_articles")
+}
+
+// ── Contact Center Enums ─────────────────────────────────────────────────────
+
+enum CCChannel {
+  EMAIL
+  SMS
+  WHATSAPP
+  TELEGRAM
+  VIBER
+  VOICE_CALL
+  LIVE_CHAT
+  INSTAGRAM
+  FACEBOOK
+  LINKEDIN
+  TWITTER
+}
+
+enum ConversationStatus {
+  OPEN
+  PENDING
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum ConversationSource {
+  DIRECT
+  CAMPAIGN
+  REFERRAL
+  INBOUND_CALL
+  CHATBOT
+  SOCIAL
+}
+
+enum Sentiment {
+  POSITIVE
+  NEUTRAL
+  NEGATIVE
+}
+
+enum CCPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageStatus {
+  SENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum SenderType {
+  CUSTOMER
+  AGENT
+  BOT
+  SYSTEM
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  PENDING
+  RESOLVED
+  CLOSED
+}
+
+enum ArticleStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model ProjectAnalysis {
+  id           String   @id @default(cuid())
+  userId       String
+  githubUrl    String
+  projectName  String
+  description  String?
+  targetMarket String?
+  businessModel String?
+  analysis     Json
+  confidence   Float    @default(0)
+  status       String   @default("COMPLETED")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
