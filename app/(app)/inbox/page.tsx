@@ -366,7 +366,14 @@ export default function InboxPage() {
                           ? (lastMsg.direction === 'OUTBOUND' ? '↳ ' : '') + lastMsg.content
                           : 'No messages yet'}
                       </p>
-                      <div className="flex items-center gap-1.5 mt-1">
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                        {/* Channel badge — always visible */}
+                        <span className={cn(
+                          'text-xs px-1.5 py-0.5 rounded-full font-medium',
+                          meta.bg, meta.color
+                        )}>
+                          {meta.label}
+                        </span>
                         <span className={cn('text-xs px-1.5 py-0.5 rounded-full font-medium', STATUS_COLORS[conv.status])}>
                           {conv.status}
                         </span>

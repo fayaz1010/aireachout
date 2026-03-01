@@ -6,7 +6,7 @@ import { prisma } from '@/lib/db'
 const FB_PAGE_TOKEN    = process.env.FACEBOOK_PAGE_ACCESS_TOKEN!
 const TELEGRAM_TOKEN   = process.env.TELEGRAM_HUB_BOT_TOKEN
 
-async function sendFacebookMessage(recipientId: string, text: string) {
+async function sendMetaMessage(recipientId: string, text: string, channel: 'FACEBOOK' | 'INSTAGRAM') {
   const res = await fetch(
     `https://graph.facebook.com/v19.0/me/messages?access_token=${FB_PAGE_TOKEN}`,
     {
@@ -17,7 +17,7 @@ async function sendFacebookMessage(recipientId: string, text: string) {
   )
   if (!res.ok) {
     const err = await res.json()
-    throw new Error(`Facebook send failed: ${JSON.stringify(err)}`)
+    throw new Error(`${channel} send failed: ${JSON.stringify(err)}`)
   }
   return res.json()
 }
@@ -62,8 +62,9 @@ export async function POST(
     let externalId: string | null = null
     switch (conversation.channel) {
       case 'FACEBOOK':
-        if (!conversation.externalId) throw new Error('No Facebook sender ID on conversation')
-        await sendFacebookMessage(conversation.externalId, text)
+      case 'INSTAGRAM':
+        if (!conversation.externalId) throw new Error(`No sender ID on ${conversation.channel} conversation`)
+        await sendMetaMessage(conversation.externalId, text, conversation.channel as 'FACEBOOK' | 'INSTAGRAM')
         externalId = conversation.externalId
         break
 
