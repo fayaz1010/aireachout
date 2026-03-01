@@ -1,514 +1,573 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { useSession } from 'next-auth/react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { format, formatDistanceToNow } from 'date-fns'
 import {
-  MessageSquare,
-  Search,
-  Filter,
-  Send,
-  Paperclip,
-  Smile,
-  MoreHorizontal,
-  Phone,
-  Video,
-  Info,
-  ArrowLeft,
-  Bot,
-  Sparkles,
-  Flame,
-  Mail,
-  MessageCircle,
-  Hash,
-  Twitter,
-  Linkedin,
-  Instagram,
-  Facebook,
-  CheckCheck,
-  Clock,
-  X,
-  Plus,
+  MessageSquare, Send, Search, RefreshCw, User, Tag,
+  Briefcase, ChevronRight, Facebook, Phone, Mail,
+  MessageCircle, Instagram, Twitter, Linkedin, Globe,
+  Bot, Star, AlertCircle, CheckCheck, Clock, Filter,
+  SlidersHorizontal, X, ArrowLeft
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
 
-interface Conversation {
-  id: string
-  contactName: string
-  contactEmail?: string
-  contactPhone?: string
-  channel: string
-  status: string
-  lastMessage: string
-  lastMessageTime: string
-  unreadCount: number
-  sentiment?: string
-  isHotLead?: boolean
-  campaignName?: string
-  avatar?: string
-}
+// ── Types ────────────────────────────────────────────────────────────────────
 
 interface Message {
   id: string
   content: string
   direction: 'INBOUND' | 'OUTBOUND'
+  channel: string
+  senderType: string
+  senderName: string | null
+  status: string
   createdAt: string
-  senderName?: string
+  isAiGenerated: boolean
 }
 
-const MOCK_CONVERSATIONS: Conversation[] = [
-  {
-    id: '1',
-    contactName: 'Sarah Johnson',
-    contactEmail: 'sarah@techcorp.com',
-    channel: 'EMAIL',
-    status: 'OPEN',
-    lastMessage: "I'm interested in learning more about your platform...",
-    lastMessageTime: '2m ago',
-    unreadCount: 2,
-    sentiment: 'POSITIVE',
-    isHotLead: true,
-    campaignName: 'Q4 Outreach',
-  },
-  {
-    id: '2',
-    contactName: 'Mike Chen',
-    contactEmail: 'mike@growthco.com',
-    channel: 'WHATSAPP',
-    status: 'OPEN',
-    lastMessage: 'Can we schedule a demo call?',
-    lastMessageTime: '15m ago',
-    unreadCount: 1,
-    sentiment: 'POSITIVE',
-  },
-  {
-    id: '3',
-    contactName: 'Lisa Wang',
-    contactEmail: 'lisa@startup.io',
-    channel: 'SMS',
-    status: 'OPEN',
-    lastMessage: 'Thanks for reaching out!',
-    lastMessageTime: '1h ago',
-    unreadCount: 0,
-    sentiment: 'NEUTRAL',
-  },
-  {
-    id: '4',
-    contactName: 'Alex Rivera',
-    contactEmail: 'alex@salespro.com',
-    channel: 'LINKEDIN',
-    status: 'PENDING',
-    lastMessage: 'Interesting proposal, let me think about it.',
-    lastMessageTime: '3h ago',
-    unreadCount: 0,
-    sentiment: 'NEUTRAL',
-  },
-  {
-    id: '5',
-    contactName: 'Emma Davis',
-    contactEmail: 'emma@company.com',
-    channel: 'EMAIL',
-    status: 'RESOLVED',
-    lastMessage: 'Great, I signed up for the trial.',
-    lastMessageTime: 'Yesterday',
-    unreadCount: 0,
-    sentiment: 'POSITIVE',
-    campaignName: 'Enterprise Outreach',
-  },
-]
-
-const MOCK_MESSAGES: Message[] = [
-  { id: '1', content: 'Hi, I saw your outreach email about your AI platform.', direction: 'INBOUND', createdAt: '10:00 AM', senderName: 'Sarah Johnson' },
-  { id: '2', content: "Hi Sarah! Thanks for reaching out. I'd love to tell you more about how ReachOut AI can help your business.", direction: 'OUTBOUND', createdAt: '10:02 AM', senderName: 'You' },
-  { id: '3', content: "That sounds interesting! We're looking for a solution to automate our lead generation. What makes your platform different?", direction: 'INBOUND', createdAt: '10:05 AM', senderName: 'Sarah Johnson' },
-  { id: '4', content: "Great question! Our platform combines AI-powered lead generation with a unified contact center. You can find leads, send personalized outreach, and manage all your conversations in one place.", direction: 'OUTBOUND', createdAt: '10:07 AM', senderName: 'You' },
-  { id: '5', content: "I'm interested in learning more about your platform. Can we schedule a demo?", direction: 'INBOUND', createdAt: '10:15 AM', senderName: 'Sarah Johnson' },
-]
-
-const channelIcons: Record<string, { icon: React.ComponentType<{ className?: string }>; color: string; bg: string }> = {
-  EMAIL: { icon: Mail, color: 'text-blue-400', bg: 'bg-blue-500/10' },
-  WHATSAPP: { icon: MessageCircle, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
-  SMS: { icon: Hash, color: 'text-amber-400', bg: 'bg-amber-500/10' },
-  TELEGRAM: { icon: Send, color: 'text-sky-400', bg: 'bg-sky-500/10' },
-  LINKEDIN: { icon: Linkedin, color: 'text-blue-300', bg: 'bg-blue-500/10' },
-  TWITTER: { icon: Twitter, color: 'text-sky-300', bg: 'bg-sky-500/10' },
-  INSTAGRAM: { icon: Instagram, color: 'text-rose-400', bg: 'bg-rose-500/10' },
-  FACEBOOK: { icon: Facebook, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-  VOICE_CALL: { icon: Phone, color: 'text-violet-400', bg: 'bg-violet-500/10' },
+interface Campaign {
+  id: string
+  name: string
+  campaignType: string
+  status: string
+  subject?: string
 }
 
-const sentimentColors: Record<string, string> = {
-  POSITIVE: 'text-emerald-400',
-  NEUTRAL: 'text-amber-400',
-  NEGATIVE: 'text-red-400',
+interface Lead {
+  id: string
+  firstName: string | null
+  lastName: string | null
+  email: string
+  phone: string | null
+  companyName: string | null
+  jobTitle: string | null
+  leadScore: number | null
+  status: string
+  tags: string[]
 }
 
-function ConversationItem({
-  conv,
-  selected,
-  onClick,
-}: {
-  conv: Conversation
-  selected: boolean
-  onClick: () => void
-}) {
-  const ch = channelIcons[conv.channel] || channelIcons.EMAIL
-  const Icon = ch.icon
-  const initials = conv.contactName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
+interface Customer {
+  id: string
+  name: string
+  email: string | null
+  phone: string | null
+}
 
+interface Conversation {
+  id: string
+  channel: string
+  status: string
+  subject: string | null
+  externalId: string | null
+  createdAt: string
+  updatedAt: string
+  customer: Customer | null
+  messages: Message[]
+  campaign: Campaign | null
+  lead: Lead | null
+  campaignId: string | null
+  leadId: string | null
+}
+
+// ── Channel helpers ───────────────────────────────────────────────────────────
+
+const CHANNEL_META: Record<string, { label: string; icon: any; color: string; bg: string }> = {
+  FACEBOOK:   { label: 'Messenger',  icon: Facebook,       color: 'text-blue-600',  bg: 'bg-blue-50'   },
+  INSTAGRAM:  { label: 'Instagram',  icon: Instagram,      color: 'text-pink-600',  bg: 'bg-pink-50'   },
+  WHATSAPP:   { label: 'WhatsApp',   icon: MessageCircle,  color: 'text-green-600', bg: 'bg-green-50'  },
+  TELEGRAM:   { label: 'Telegram',   icon: MessageCircle,  color: 'text-sky-500',   bg: 'bg-sky-50'    },
+  TWITTER:    { label: 'Twitter/X',  icon: Twitter,        color: 'text-black',     bg: 'bg-gray-50'   },
+  LINKEDIN:   { label: 'LinkedIn',   icon: Linkedin,       color: 'text-blue-700',  bg: 'bg-blue-50'   },
+  EMAIL:      { label: 'Email',      icon: Mail,           color: 'text-orange-600',bg: 'bg-orange-50' },
+  SMS:        { label: 'SMS',        icon: Phone,          color: 'text-purple-600',bg: 'bg-purple-50' },
+  LIVE_CHAT:  { label: 'Live Chat',  icon: Globe,          color: 'text-teal-600',  bg: 'bg-teal-50'   },
+  VOICE_CALL: { label: 'Voice',      icon: Phone,          color: 'text-red-600',   bg: 'bg-red-50'    },
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  OPEN:        'bg-green-100 text-green-700',
+  PENDING:     'bg-yellow-100 text-yellow-700',
+  IN_PROGRESS: 'bg-blue-100 text-blue-700',
+  RESOLVED:    'bg-gray-100 text-gray-600',
+  CLOSED:      'bg-gray-100 text-gray-500',
+}
+
+function ChannelIcon({ channel, size = 14 }: { channel: string; size?: number }) {
+  const meta = CHANNEL_META[channel] ?? { icon: MessageSquare, color: 'text-gray-500', bg: 'bg-gray-50' }
+  const Icon = meta.icon
   return (
-    <button
-      onClick={onClick}
-      className={cn(
-        'w-full text-left flex items-start gap-3 px-3 py-3 transition-all',
-        selected
-          ? 'bg-violet-500/10 border-r-2 border-violet-500'
-          : 'hover:bg-white/[0.02] border-r-2 border-transparent'
-      )}
-    >
-      <div className="relative shrink-0">
-        <div className="flex h-9 w-9 items-center justify-center rounded-full aurora-gradient text-xs font-bold text-white">
-          {initials}
-        </div>
-        <div className={cn('absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full border-2 border-aurora-bg', ch.bg)}>
-          <Icon className={cn('h-2 w-2', ch.color)} />
-        </div>
-      </div>
-
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between mb-0.5">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className={cn('text-xs font-semibold truncate', selected ? 'text-white' : 'text-foreground')}>
-              {conv.contactName}
-            </span>
-            {conv.isHotLead && <Flame className="h-3 w-3 text-rose-400 shrink-0" />}
-          </div>
-          <span className="text-[10px] text-muted-foreground shrink-0 ml-1">{conv.lastMessageTime}</span>
-        </div>
-        <p className={cn('text-[11px] truncate', conv.unreadCount > 0 ? 'text-foreground' : 'text-muted-foreground')}>
-          {conv.lastMessage}
-        </p>
-        <div className="flex items-center gap-1.5 mt-1">
-          {conv.campaignName && (
-            <span className="text-[10px] text-violet-400 truncate">via {conv.campaignName}</span>
-          )}
-          {conv.unreadCount > 0 && (
-            <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-violet-500 text-[10px] font-bold text-white px-1">
-              {conv.unreadCount}
-            </span>
-          )}
-        </div>
-      </div>
-    </button>
+    <span className={cn('inline-flex items-center justify-center rounded-full p-1', meta.bg)}>
+      <Icon size={size} className={meta.color} />
+    </span>
   )
 }
 
-const STATUS_TABS = ['All', 'Open', 'Pending', 'Resolved']
+// ── Main Component ────────────────────────────────────────────────────────────
 
 export default function InboxPage() {
-  const [conversations] = useState<Conversation[]>(MOCK_CONVERSATIONS)
-  const [selected, setSelected] = useState<Conversation | null>(MOCK_CONVERSATIONS[0])
-  const [messages] = useState<Message[]>(MOCK_MESSAGES)
-  const [messageInput, setMessageInput] = useState('')
-  const [search, setSearch] = useState('')
-  const [tab, setTab] = useState('All')
-  const [showAI, setShowAI] = useState(true)
+  const { data: session, status } = useSession()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
+  const [conversations, setConversations] = useState<Conversation[]>([])
+  const [selectedConv, setSelectedConv]   = useState<Conversation | null>(null)
+  const [loading, setLoading]             = useState(true)
+  const [loadingConv, setLoadingConv]     = useState(false)
+  const [sending, setSending]             = useState(false)
+  const [replyText, setReplyText]         = useState('')
+  const [search, setSearch]               = useState('')
+  const [channelFilter, setChannelFilter] = useState('')
+  const [showMobileChat, setShowMobileChat] = useState(false)
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const replyRef       = useRef<HTMLTextAreaElement>(null)
+
+  // ── Fetch conversations ──────────────────────────────────────────────────
+
+  const fetchConversations = useCallback(async () => {
+    try {
+      const params = new URLSearchParams()
+      if (search)        params.set('search',  search)
+      if (channelFilter) params.set('channel', channelFilter)
+      const res = await fetch(`/api/inbox/conversations?${params}`)
+      if (res.ok) {
+        const data = await res.json()
+        setConversations(data.conversations)
+      }
+    } catch { toast.error('Failed to load conversations') }
+    finally { setLoading(false) }
+  }, [search, channelFilter])
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, selected])
+    if (status === 'unauthenticated') router.push('/login')
+    if (session?.user) fetchConversations()
+  }, [session, status, fetchConversations])
 
-  const filtered = conversations.filter((c) => {
-    const matchTab = tab === 'All' || c.status === tab.toUpperCase()
-    const matchSearch = !search || c.contactName.toLowerCase().includes(search.toLowerCase())
-    return matchTab && matchSearch
-  })
+  // Auto-refresh every 15s
+  useEffect(() => {
+    const t = setInterval(fetchConversations, 15000)
+    return () => clearInterval(t)
+  }, [fetchConversations])
+
+  // Open conversation from URL param
+  useEffect(() => {
+    const id = searchParams.get('id')
+    if (id && conversations.length) {
+      const conv = conversations.find(c => c.id === id)
+      if (conv) openConversation(conv)
+    }
+  }, [conversations, searchParams])
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [selectedConv?.messages])
+
+  // ── Open conversation ────────────────────────────────────────────────────
+
+  const openConversation = async (conv: Conversation) => {
+    setLoadingConv(true)
+    setShowMobileChat(true)
+    try {
+      const res = await fetch(`/api/inbox/conversations/${conv.id}/messages`)
+      if (res.ok) {
+        const data = await res.json()
+        setSelectedConv(data)
+        router.replace(`/inbox?id=${conv.id}`, { scroll: false })
+      }
+    } catch { toast.error('Failed to load conversation') }
+    finally { setLoadingConv(false) }
+  }
+
+  // ── Send reply ───────────────────────────────────────────────────────────
+
+  const sendReply = async () => {
+    if (!replyText.trim() || !selectedConv || sending) return
+    setSending(true)
+    try {
+      const res = await fetch(`/api/inbox/conversations/${selectedConv.id}/reply`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ text: replyText.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setReplyText('')
+      // Re-fetch conversation to show new message
+      await openConversation(selectedConv)
+      toast.success('Message sent')
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to send message')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      sendReply()
+    }
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────────
+
+  if (status === 'loading' || loading) {
+    return (
+      <div className="flex flex-1 items-center justify-center">
+        <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
 
   return (
-    <div className="fade-in -m-4 md:-m-6 lg:-m-8 h-[calc(100vh-56px)] flex overflow-hidden">
-      {/* Conversation list */}
-      <div
-        className={cn(
-          'flex flex-col border-r border-white/[0.06]',
-          selected ? 'hidden md:flex w-72 lg:w-80 shrink-0' : 'flex w-full md:w-72 lg:w-80 shrink-0'
-        )}
-        style={{ backgroundColor: 'var(--sidebar-bg)' }}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-white/[0.06] px-3 py-3">
-          <h2 className="text-sm font-semibold text-foreground">Inbox</h2>
-          <div className="flex items-center gap-1">
-            <button className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-white/5">
-              <Filter className="h-3.5 w-3.5" />
-            </button>
-            <button className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-white/5">
-              <Plus className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
+    <div className="flex flex-1 overflow-hidden bg-background h-full">
 
-        {/* Search */}
-        <div className="px-3 py-2 border-b border-white/[0.06]">
-          <div className="flex items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5">
-            <Search className="h-3 w-3 text-muted-foreground shrink-0" />
-            <input
-              className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground/50 outline-none"
+      {/* ── LEFT: Conversation list ─────────────────────────────────────── */}
+      <aside className={cn(
+        'flex flex-col border-r w-full md:w-80 lg:w-96 shrink-0',
+        showMobileChat && 'hidden md:flex'
+      )}>
+        {/* Header */}
+        <div className="p-4 border-b space-y-3">
+          <div className="flex items-center justify-between">
+            <h1 className="font-semibold text-lg">Inbox</h1>
+            <Button size="sm" variant="ghost" onClick={fetchConversations}>
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
               placeholder="Search conversations..."
+              className="pl-9"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={e => setSearch(e.target.value)}
             />
           </div>
-        </div>
-
-        {/* Status tabs */}
-        <div className="flex items-center gap-0.5 px-3 py-2 border-b border-white/[0.06]">
-          {STATUS_TABS.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={cn(
-                'flex-1 py-1 rounded-md text-[11px] font-medium transition-all',
-                tab === t
-                  ? 'bg-violet-500/15 text-violet-300'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
-              )}
-            >
-              {t}
-            </button>
-          ))}
+          {/* Channel filter pills */}
+          <div className="flex gap-1.5 flex-wrap">
+            {['', 'FACEBOOK', 'WHATSAPP', 'TELEGRAM', 'INSTAGRAM', 'EMAIL'].map(ch => (
+              <button
+                key={ch}
+                onClick={() => setChannelFilter(ch)}
+                className={cn(
+                  'px-2.5 py-0.5 rounded-full text-xs font-medium border transition-colors',
+                  channelFilter === ch
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-background text-muted-foreground border-border hover:border-primary'
+                )}
+              >
+                {ch ? (CHANNEL_META[ch]?.label ?? ch) : 'All'}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto scrollbar-thin divide-y divide-white/[0.03]">
-          {filtered.map((conv) => (
-            <ConversationItem
-              key={conv.id}
-              conv={conv}
-              selected={selected?.id === conv.id}
-              onClick={() => setSelected(conv)}
-            />
-          ))}
+        <div className="flex-1 overflow-y-auto divide-y">
+          {conversations.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2 p-8">
+              <MessageSquare className="h-10 w-10 opacity-30" />
+              <p className="text-sm">No conversations yet</p>
+            </div>
+          ) : (
+            conversations.map(conv => {
+              const lastMsg   = conv.messages?.[0]
+              const isSelected = selectedConv?.id === conv.id
+              const meta      = CHANNEL_META[conv.channel] ?? CHANNEL_META['EMAIL']
+              return (
+                <button
+                  key={conv.id}
+                  onClick={() => openConversation(conv)}
+                  className={cn(
+                    'w-full text-left px-4 py-3 hover:bg-muted/50 transition-colors',
+                    isSelected && 'bg-muted'
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 shrink-0">
+                      <ChannelIcon channel={conv.channel} size={16} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-sm truncate">
+                          {conv.customer?.name ?? conv.subject ?? `${meta.label} User`}
+                        </span>
+                        <span className="text-xs text-muted-foreground shrink-0">
+                          {formatDistanceToNow(new Date(conv.updatedAt), { addSuffix: false })}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground truncate mt-0.5">
+                        {lastMsg
+                          ? (lastMsg.direction === 'OUTBOUND' ? '↳ ' : '') + lastMsg.content
+                          : 'No messages yet'}
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <span className={cn('text-xs px-1.5 py-0.5 rounded-full font-medium', STATUS_COLORS[conv.status])}>
+                          {conv.status}
+                        </span>
+                        {conv.campaign && (
+                          <span className="text-xs px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium truncate max-w-[100px]">
+                            {conv.campaign.name}
+                          </span>
+                        )}
+                        {conv.lead?.leadScore && (
+                          <span className="text-xs px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">
+                            ★ {conv.lead.leadScore}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              )
+            })
+          )}
         </div>
-      </div>
+      </aside>
 
-      {/* Chat panel */}
-      {selected ? (
-        <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
-          {/* Chat header */}
-          <div className="flex h-14 items-center justify-between border-b border-white/[0.06] px-4 shrink-0" style={{ backgroundColor: 'var(--aurora-bg)' }}>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setSelected(null)}
-                className="md:hidden h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-white/5"
+      {/* ── CENTER: Chat thread ──────────────────────────────────────────── */}
+      <main className={cn(
+        'flex flex-col flex-1 min-w-0',
+        !showMobileChat && 'hidden md:flex'
+      )}>
+        {!selectedConv ? (
+          <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
+            <MessageSquare className="h-16 w-16 opacity-20" />
+            <p className="text-sm">Select a conversation to start</p>
+          </div>
+        ) : (
+          <>
+            {/* Chat header */}
+            <div className="flex items-center gap-3 px-4 py-3 border-b bg-background">
+              <Button
+                size="sm" variant="ghost"
+                className="md:hidden"
+                onClick={() => setShowMobileChat(false)}
               >
                 <ArrowLeft className="h-4 w-4" />
-              </button>
-              <div className="flex h-8 w-8 items-center justify-center rounded-full aurora-gradient text-xs font-bold text-white">
-                {selected.contactName.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-                  {selected.contactName}
-                  {selected.isHotLead && <Flame className="h-3.5 w-3.5 text-rose-400" />}
+              </Button>
+              <ChannelIcon channel={selectedConv.channel} size={18} />
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold truncate">
+                  {selectedConv.customer?.name ?? selectedConv.subject ?? 'Unknown'}
                 </p>
-                <p className="text-xs text-muted-foreground">{selected.contactEmail}</p>
+                <p className="text-xs text-muted-foreground">
+                  {CHANNEL_META[selectedConv.channel]?.label ?? selectedConv.channel}
+                  {selectedConv.customer?.email && ` · ${selectedConv.customer.email}`}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={cn('text-xs px-2 py-1 rounded-full font-medium', STATUS_COLORS[selectedConv.status])}>
+                  {selectedConv.status}
+                </span>
+                {selectedConv.campaign && (
+                  <span className="hidden sm:inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-violet-100 text-violet-700 font-medium">
+                    <Briefcase className="h-3 w-3" />
+                    {selectedConv.campaign.name}
+                  </span>
+                )}
               </div>
             </div>
-            <div className="flex items-center gap-1">
-              <button className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10 transition-colors">
-                <Phone className="h-4 w-4" />
-              </button>
-              <button
-                onClick={() => setShowAI(!showAI)}
-                className={cn(
-                  'h-7 px-2 flex items-center gap-1 rounded-md text-xs transition-colors',
-                  showAI
-                    ? 'text-violet-300 bg-violet-500/15'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
-                )}
-              >
-                <Bot className="h-3.5 w-3.5" /> AI Assist
-              </button>
-              <button className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-white/5">
-                <MoreHorizontal className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
 
-          <div className="flex flex-1 min-h-0">
             {/* Messages */}
-            <div className="flex flex-1 flex-col min-w-0">
-              {/* Campaign source badge */}
-              {selected.campaignName && (
-                <div className="flex items-center justify-center px-4 py-2 border-b border-white/[0.04]">
-                  <span className="text-[11px] text-violet-400 bg-violet-500/10 px-2.5 py-1 rounded-full border border-violet-500/20">
-                    Conversation started via campaign: {selected.campaignName}
-                  </span>
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+              {loadingConv ? (
+                <div className="flex justify-center pt-8">
+                  <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>
-              )}
-
-              {/* Message list */}
-              <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4 space-y-3">
-                {messages.map((msg) => (
+              ) : selectedConv.messages.length === 0 ? (
+                <p className="text-center text-sm text-muted-foreground pt-8">No messages yet</p>
+              ) : (
+                selectedConv.messages.map(msg => (
                   <div
                     key={msg.id}
-                    className={cn('flex gap-2.5', msg.direction === 'OUTBOUND' && 'flex-row-reverse')}
+                    className={cn('flex', msg.direction === 'OUTBOUND' ? 'justify-end' : 'justify-start')}
                   >
-                    {msg.direction === 'INBOUND' && (
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full aurora-gradient text-[10px] font-bold text-white mt-0.5">
-                        {selected.contactName.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-                      </div>
-                    )}
-                    <div className={cn('max-w-[65%]', msg.direction === 'OUTBOUND' && 'items-end flex flex-col')}>
-                      <div
-                        className={cn(
-                          'rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed',
-                          msg.direction === 'OUTBOUND'
-                            ? 'aurora-gradient text-white rounded-tr-sm'
-                            : 'bg-white/[0.05] border border-white/[0.06] text-foreground rounded-tl-sm'
+                    <div className={cn(
+                      'max-w-[75%] rounded-2xl px-4 py-2.5 text-sm shadow-sm',
+                      msg.direction === 'OUTBOUND'
+                        ? 'bg-primary text-primary-foreground rounded-br-sm'
+                        : 'bg-muted text-foreground rounded-bl-sm'
+                    )}>
+                      {msg.senderName && msg.direction === 'INBOUND' && (
+                        <p className="text-xs font-medium opacity-70 mb-1">{msg.senderName}</p>
+                      )}
+                      <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                      <div className={cn(
+                        'flex items-center gap-1 mt-1 text-xs opacity-60',
+                        msg.direction === 'OUTBOUND' ? 'justify-end' : 'justify-start'
+                      )}>
+                        {msg.isAiGenerated && <Bot className="h-3 w-3" />}
+                        <span>{format(new Date(msg.createdAt), 'HH:mm')}</span>
+                        {msg.direction === 'OUTBOUND' && (
+                          <CheckCheck className="h-3 w-3" />
                         )}
-                      >
-                        {msg.content}
-                      </div>
-                      <div className="flex items-center gap-1 mt-1 px-1">
-                        <span className="text-[10px] text-muted-foreground">{msg.createdAt}</span>
-                        {msg.direction === 'OUTBOUND' && <CheckCheck className="h-3 w-3 text-emerald-400" />}
                       </div>
                     </div>
                   </div>
-                ))}
-                <div ref={messagesEndRef} />
-              </div>
-
-              {/* AI quick suggestions */}
-              <div className="border-t border-white/[0.04] px-4 py-2 flex items-center gap-2 overflow-x-auto scrollbar-hide">
-                {[
-                  'Happy to schedule a demo! When works for you?',
-                  'Could you share more about your use case?',
-                  "I'll send over our pricing shortly.",
-                ].map((s, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setMessageInput(s)}
-                    className="shrink-0 text-[11px] text-violet-300 bg-violet-500/10 border border-violet-500/20 px-2.5 py-1.5 rounded-full hover:bg-violet-500/20 transition-colors whitespace-nowrap"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-
-              {/* Input */}
-              <div className="shrink-0 border-t border-white/[0.06] px-4 py-3" style={{ backgroundColor: 'var(--aurora-bg)' }}>
-                <div className="flex items-end gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2">
-                  <textarea
-                    className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/50 outline-none resize-none min-h-[20px] max-h-24 py-0.5 leading-5"
-                    placeholder="Type a message..."
-                    rows={1}
-                    value={messageInput}
-                    onChange={(e) => setMessageInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault()
-                        setMessageInput('')
-                      }
-                    }}
-                  />
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-white/5">
-                      <Paperclip className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      className={cn(
-                        'h-7 w-7 flex items-center justify-center rounded-lg transition-all',
-                        messageInput
-                          ? 'aurora-gradient text-white shadow-aurora-sm'
-                          : 'bg-white/5 text-muted-foreground cursor-not-allowed'
-                      )}
-                      disabled={!messageInput}
-                      onClick={() => setMessageInput('')}
-                    >
-                      <Send className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
+                ))
+              )}
+              <div ref={messagesEndRef} />
             </div>
 
-            {/* AI assist sidebar */}
-            {showAI && (
-              <div className="hidden lg:flex w-64 shrink-0 flex-col border-l border-white/[0.06] overflow-y-auto scrollbar-thin" style={{ backgroundColor: 'var(--sidebar-bg)' }}>
-                <div className="border-b border-white/[0.06] px-3 py-3">
-                  <div className="flex items-center gap-2">
-                    <Bot className="h-4 w-4 text-violet-400" />
-                    <span className="text-xs font-semibold text-foreground">AI Insights</span>
-                  </div>
-                </div>
-
-                <div className="p-3 space-y-3">
-                  {/* Sentiment */}
-                  <div className="glass-card p-3">
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Sentiment</p>
-                    <div className="flex items-center gap-2">
-                      <div className="h-2.5 w-full rounded-full bg-white/5 overflow-hidden">
-                        <div className="h-full w-4/5 rounded-full bg-emerald-500" />
-                      </div>
-                      <span className="text-xs font-semibold text-emerald-400 shrink-0">Positive</span>
-                    </div>
-                  </div>
-
-                  {/* Intent */}
-                  <div className="glass-card p-3">
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Detected Intent</p>
-                    <div className="space-y-1.5">
-                      {[
-                        { label: 'Schedule Demo', confidence: 92 },
-                        { label: 'Request Pricing', confidence: 67 },
-                      ].map((intent) => (
-                        <div key={intent.label} className="flex items-center justify-between">
-                          <span className="text-xs text-foreground">{intent.label}</span>
-                          <span className="text-xs font-semibold text-violet-400">{intent.confidence}%</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Contact info */}
-                  <div className="glass-card p-3">
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Contact Info</p>
-                    <div className="space-y-1.5 text-xs text-muted-foreground">
-                      <p className="text-foreground font-medium">{selected.contactName}</p>
-                      {selected.contactEmail && <p>{selected.contactEmail}</p>}
-                      {selected.campaignName && (
-                        <p className="text-violet-400">via {selected.campaignName}</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Actions */}
-                  <div className="space-y-1.5">
-                    <Button size="sm" className="w-full aurora-gradient text-white text-xs gap-1.5 hover:opacity-90">
-                      <Sparkles className="h-3 w-3" /> Generate Reply
-                    </Button>
-                    <Button variant="outline" size="sm" className="w-full text-xs border-white/10 gap-1.5">
-                      <Phone className="h-3 w-3" /> Schedule Call
-                    </Button>
-                  </div>
-                </div>
+            {/* Reply box */}
+            <div className="border-t p-4 bg-background">
+              <div className="flex gap-2 items-end">
+                <textarea
+                  ref={replyRef}
+                  className="flex-1 resize-none rounded-xl border bg-muted/40 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary min-h-[44px] max-h-32"
+                  placeholder={`Reply via ${CHANNEL_META[selectedConv.channel]?.label ?? selectedConv.channel}… (Enter to send)`}
+                  rows={1}
+                  value={replyText}
+                  onChange={e => setReplyText(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                />
+                <Button
+                  onClick={sendReply}
+                  disabled={!replyText.trim() || sending}
+                  size="icon"
+                  className="rounded-xl h-11 w-11 shrink-0"
+                >
+                  {sending
+                    ? <RefreshCw className="h-4 w-4 animate-spin" />
+                    : <Send className="h-4 w-4" />}
+                </Button>
               </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-1 items-center justify-center">
-          <div className="text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl aurora-gradient-subtle mx-auto mb-4">
-              <MessageSquare className="h-8 w-8 text-violet-400" />
+              <p className="text-xs text-muted-foreground mt-1.5 px-1">
+                Shift+Enter for new line · Enter to send
+              </p>
             </div>
-            <p className="text-sm font-medium text-foreground">Select a conversation</p>
-            <p className="text-xs text-muted-foreground mt-1">Choose from the list to start messaging</p>
+          </>
+        )}
+      </main>
+
+      {/* ── RIGHT: Context panel (lead / campaign info) ──────────────────── */}
+      {selectedConv && (
+        <aside className="hidden lg:flex flex-col w-72 border-l overflow-y-auto bg-muted/20">
+          <div className="p-4 border-b">
+            <h2 className="font-semibold text-sm">Conversation Details</h2>
           </div>
-        </div>
+
+          {/* Customer */}
+          {selectedConv.customer && (
+            <section className="p-4 border-b space-y-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1">
+                <User className="h-3 w-3" /> Customer
+              </h3>
+              <p className="font-medium text-sm">{selectedConv.customer.name}</p>
+              {selectedConv.customer.email && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Mail className="h-3 w-3" /> {selectedConv.customer.email}
+                </p>
+              )}
+              {selectedConv.customer.phone && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Phone className="h-3 w-3" /> {selectedConv.customer.phone}
+                </p>
+              )}
+            </section>
+          )}
+
+          {/* Lead info */}
+          {selectedConv.lead && (
+            <section className="p-4 border-b space-y-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1">
+                <Star className="h-3 w-3" /> Lead
+              </h3>
+              <p className="font-medium text-sm">
+                {[selectedConv.lead.firstName, selectedConv.lead.lastName].filter(Boolean).join(' ') || selectedConv.lead.email}
+              </p>
+              {selectedConv.lead.jobTitle && (
+                <p className="text-xs text-muted-foreground">{selectedConv.lead.jobTitle}</p>
+              )}
+              {selectedConv.lead.companyName && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Briefcase className="h-3 w-3" /> {selectedConv.lead.companyName}
+                </p>
+              )}
+              <div className="flex items-center gap-2 flex-wrap">
+                {selectedConv.lead.leadScore && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">
+                    Score: {selectedConv.lead.leadScore}
+                  </span>
+                )}
+                <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
+                  {selectedConv.lead.status}
+                </span>
+              </div>
+              {selectedConv.lead.tags?.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {selectedConv.lead.tags.map(tag => (
+                    <span key={tag} className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <Button
+                size="sm" variant="outline" className="w-full mt-1 text-xs"
+                onClick={() => router.push(`/leads?id=${selectedConv.lead!.id}`)}
+              >
+                View Lead Profile <ChevronRight className="h-3 w-3 ml-1" />
+              </Button>
+            </section>
+          )}
+
+          {/* Campaign info */}
+          {selectedConv.campaign && (
+            <section className="p-4 border-b space-y-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1">
+                <Briefcase className="h-3 w-3" /> Campaign
+              </h3>
+              <p className="font-medium text-sm">{selectedConv.campaign.name}</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">
+                  {selectedConv.campaign.campaignType}
+                </span>
+                <span className={cn(
+                  'text-xs px-2 py-0.5 rounded-full font-medium',
+                  selectedConv.campaign.status === 'SENT'   ? 'bg-green-100 text-green-700' :
+                  selectedConv.campaign.status === 'DRAFT'  ? 'bg-gray-100 text-gray-600'   :
+                  'bg-blue-100 text-blue-700'
+                )}>
+                  {selectedConv.campaign.status}
+                </span>
+              </div>
+              {selectedConv.campaign.subject && (
+                <p className="text-xs text-muted-foreground">
+                  Subject: {selectedConv.campaign.subject}
+                </p>
+              )}
+              <Button
+                size="sm" variant="outline" className="w-full mt-1 text-xs"
+                onClick={() => router.push(`/campaigns/${selectedConv.campaign!.id}`)}
+              >
+                View Campaign <ChevronRight className="h-3 w-3 ml-1" />
+              </Button>
+            </section>
+          )}
+
+          {/* Conversation metadata */}
+          <section className="p-4 space-y-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1">
+              <Clock className="h-3 w-3" /> Timeline
+            </h3>
+            <div className="space-y-1 text-xs text-muted-foreground">
+              <p>Created: {format(new Date(selectedConv.createdAt), 'MMM d, yyyy HH:mm')}</p>
+              <p>Updated: {format(new Date(selectedConv.updatedAt), 'MMM d, yyyy HH:mm')}</p>
+              <p>Messages: {selectedConv.messages.length}</p>
+              <p>Channel: {CHANNEL_META[selectedConv.channel]?.label ?? selectedConv.channel}</p>
+            </div>
+          </section>
+        </aside>
       )}
     </div>
   )

@@ -1,9 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 
-const APP_SECRET    = process.env.FACEBOOK_APP_SECRET!
-const VERIFY_TOKEN  = process.env.FACEBOOK_WEBHOOK_VERIFY_TOKEN ?? 'aireachout_webhook_verify_2026'
-const PAGE_TOKEN    = process.env.FACEBOOK_PAGE_ACCESS_TOKEN!
+const APP_SECRET   = process.env.FACEBOOK_APP_SECRET!
+const VERIFY_TOKEN = process.env.FACEBOOK_WEBHOOK_VERIFY_TOKEN ?? 'aireachout_webhook_verify_2026'
+const PAGE_TOKEN   = process.env.FACEBOOK_PAGE_ACCESS_TOKEN!
+const ADMIN_EMAIL  = process.env.SUPER_ADMIN_EMAIL
+
+/** Resolve the platform User ID that owns this Facebook page (cached per cold start) */
+let _ownerUserId: string | null = null
+async function getOwnerUserId(): Promise<string | null> {
+  if (_ownerUserId) return _ownerUserId
+  if (ADMIN_EMAIL) {
+    const user = await prisma.user.findUnique({
+      where:  { email: ADMIN_EMAIL },
+      select: { id: true },
+    }).catch(() => null)
+    if (user) { _ownerUserId = user.id; return user.id }
+  }
+  // Fall back to first user in the platform
+  const first = await prisma.user.findFirst({ select: { id: true } }).catch(() => null)
+  if (first) { _ownerUserId = first.id; return first.id }
+  return null
+}
 
 /** GET — Facebook webhook verification handshake */
 export async function GET(request: NextRequest) {
@@ -26,52 +44,53 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.text()
 
-    // Verify request signature (X-Hub-Signature-256)
+    // Verify X-Hub-Signature-256
     const signature = request.headers.get('x-hub-signature-256')
     if (APP_SECRET && signature) {
       const { createHmac } = await import('crypto')
       const expected = 'sha256=' + createHmac('sha256', APP_SECRET).update(body).digest('hex')
       if (signature !== expected) {
-        console.warn('[FB Messenger] Invalid signature — possible spoofed request')
+        console.warn('[FB Messenger] Invalid signature')
         return NextResponse.json({ error: 'Invalid signature' }, { status: 403 })
       }
     }
 
     const payload = JSON.parse(body)
-
-    // Facebook sends batched entries
-    if (payload.object !== 'page') {
-      return NextResponse.json({ ok: true })
-    }
+    if (payload.object !== 'page') return NextResponse.json({ ok: true })
 
     for (const entry of payload.entry ?? []) {
       for (const event of entry.messaging ?? []) {
-        await handleMessagingEvent(event)
+        await handleMessagingEvent(event).catch(err =>
+          console.error('[FB Messenger] Event error:', err)
+        )
       }
     }
 
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error('[FB Messenger] Webhook error:', err)
-    // Always return 200 to prevent Facebook from disabling the webhook
+    // Always 200 — prevents Facebook from disabling the webhook
     return NextResponse.json({ ok: false, error: String(err) })
   }
 }
 
 async function handleMessagingEvent(event: any) {
-  // Skip message echoes (messages sent BY the page)
   if (event.message?.is_echo) return
-  // Skip read receipts and delivery confirmations
   if (event.read || event.delivery) return
 
-  const senderId   = event.sender?.id as string
-  const pageId     = event.recipient?.id as string
+  const senderId    = event.sender?.id as string
   const messageText = event.message?.text ?? ''
-  const timestamp  = event.timestamp ? new Date(event.timestamp) : new Date()
+  const timestamp   = event.timestamp ? new Date(event.timestamp) : new Date()
 
   if (!senderId) return
 
-  // Fetch sender profile from Facebook Graph API
+  const userId = await getOwnerUserId()
+  if (!userId) {
+    console.error('[FB Messenger] No platform user found — cannot save message')
+    return
+  }
+
+  // Fetch sender profile
   let senderName = `FB User ${senderId}`
   try {
     const profileRes = await fetch(
@@ -83,46 +102,80 @@ async function handleMessagingEvent(event: any) {
     }
   } catch { /* non-critical */ }
 
-  // Find or create customer
+  // Find or create Customer
   let customer = await prisma.customer.findFirst({
-    where: { userId: pageId, telegram: senderId }, // reusing telegram field for FB sender ID
+    where: { userId, telegram: senderId },
   })
-
   if (!customer) {
     customer = await prisma.customer.create({
-      data: {
-        userId:   pageId,
-        name:     senderName,
-        telegram: senderId, // storing FB PSID here until schema has dedicated field
-        tags:     ['facebook', 'messenger'],
-      },
+      data: { userId, name: senderName, telegram: senderId, tags: ['facebook', 'messenger'] },
     })
   }
 
-  // Find or create conversation (keyed by FB PSID)
-  let conversation = await prisma.conversation.findFirst({
+  // Try to match a Lead (by name similarity or existing link)
+  let leadId:     string | null = null
+  let campaignId: string | null = null
+
+  const nameParts = senderName.trim().split(' ')
+  const firstName = nameParts[0]
+  const lastName  = nameParts.slice(1).join(' ') || undefined
+
+  const lead = await prisma.lead.findFirst({
     where: {
-      userId:     pageId,
-      channel:    'FACEBOOK',
-      externalId: senderId,
-      status:     { not: 'CLOSED' },
+      project: { userId },
+      OR: [
+        { firstName: { equals: firstName, mode: 'insensitive' } },
+        ...(lastName ? [{ lastName: { equals: lastName, mode: 'insensitive' } }] : []),
+      ],
     },
+    orderBy: { createdAt: 'desc' },
+  }).catch(() => null)
+
+  if (lead) {
+    leadId = lead.id
+    // Find the most recent sent/active campaign that targeted this lead
+    const campaign = await prisma.campaign.findFirst({
+      where: {
+        userId,
+        targetLeadIds: { has: lead.id },
+        status:        { not: 'DRAFT' },
+      },
+      orderBy: { sentAt: 'desc' },
+      select:  { id: true },
+    }).catch(() => null)
+    campaignId = campaign?.id ?? null
+  }
+
+  // Find or create Conversation
+  let conversation = await prisma.conversation.findFirst({
+    where: { userId, channel: 'FACEBOOK', externalId: senderId, status: { not: 'CLOSED' } },
   })
 
   if (!conversation) {
     conversation = await prisma.conversation.create({
       data: {
-        userId:     pageId,
+        userId,
         customerId: customer.id,
         channel:    'FACEBOOK',
         externalId: senderId,
         source:     'SOCIAL',
         status:     'OPEN',
+        ...(leadId     && { leadId }),
+        ...(campaignId && { campaignId }),
+      },
+    })
+  } else if ((!conversation.leadId && leadId) || (!conversation.campaignId && campaignId)) {
+    // Enrich existing conversation with newly matched lead/campaign
+    conversation = await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: {
+        ...(leadId     && { leadId }),
+        ...(campaignId && { campaignId }),
       },
     })
   }
 
-  // Save the inbound message
+  // Save message
   await prisma.message.create({
     data: {
       conversationId: conversation.id,
@@ -130,8 +183,8 @@ async function handleMessagingEvent(event: any) {
       direction:      'INBOUND',
       channel:        'FACEBOOK',
       senderType:     'CUSTOMER',
-      senderId:       senderId,
-      senderName:     senderName,
+      senderId,
+      senderName,
       status:         'DELIVERED',
       deliveredAt:    timestamp,
       attachments:    event.message?.attachments
@@ -140,17 +193,16 @@ async function handleMessagingEvent(event: any) {
     },
   })
 
-  // Mark as seen on Messenger
+  // Mark seen
   if (PAGE_TOKEN) {
     fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${PAGE_TOKEN}`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({
-        recipient:      { id: senderId },
-        sender_action:  'mark_seen',
-      }),
+      body:    JSON.stringify({ recipient: { id: senderId }, sender_action: 'mark_seen' }),
     }).catch(() => {})
   }
 
-  console.log(`[FB Messenger] Message saved — sender: ${senderName}, text: ${messageText?.slice(0, 60)}`)
+  console.log(
+    `[FB Messenger] Saved — ${senderName} | lead: ${leadId ?? 'none'} | campaign: ${campaignId ?? 'none'} | "${messageText?.slice(0, 60)}"`
+  )
 }

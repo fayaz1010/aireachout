@@ -2,9 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
+import { usePathname } from 'next/navigation'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
 import { cn } from '@/lib/utils'
+
+// Pages that manage their own full-height layout (no padding wrapper, no scroll on main)
+const FULL_HEIGHT_ROUTES = ['/inbox']
 
 interface AppShellProps {
   children: React.ReactNode
@@ -12,9 +16,11 @@ interface AppShellProps {
 
 export function AppShell({ children }: AppShellProps) {
   const { data: session } = useSession()
+  const pathname = usePathname()
   const [userRole, setUserRole] = useState<string>('USER')
   const [subscriptionStatus, setSubscriptionStatus] = useState<string>('TRIAL')
   const [inboxUnread, setInboxUnread] = useState(0)
+  const isFullHeight = FULL_HEIGHT_ROUTES.some(r => pathname?.startsWith(r))
 
   useEffect(() => {
     if (session?.user?.email) {
@@ -28,6 +34,19 @@ export function AppShell({ children }: AppShellProps) {
     }
   }, [session?.user?.email])
 
+  // Poll unread inbox count every 30 seconds
+  useEffect(() => {
+    if (!session?.user?.email) return
+    const fetchUnread = () =>
+      fetch('/api/inbox/unread')
+        .then(r => r.json())
+        .then(d => setInboxUnread(d.count ?? 0))
+        .catch(() => {})
+    fetchUnread()
+    const t = setInterval(fetchUnread, 30_000)
+    return () => clearInterval(t)
+  }, [session?.user?.email])
+
   return (
     <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--aurora-bg)' }}>
       {/* Sidebar */}
@@ -38,10 +57,17 @@ export function AppShell({ children }: AppShellProps) {
         <TopBar userRole={userRole} subscriptionStatus={subscriptionStatus} />
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto scrollbar-thin">
-          <div className="mx-auto max-w-[1400px] p-4 md:p-6 lg:p-8">
-            {children}
-          </div>
+        <main className={cn(
+          'flex-1 min-h-0',
+          isFullHeight
+            ? 'overflow-hidden flex flex-col'
+            : 'overflow-y-auto scrollbar-thin'
+        )}>
+          {isFullHeight ? children : (
+            <div className="mx-auto max-w-[1400px] p-4 md:p-6 lg:p-8">
+              {children}
+            </div>
+          )}
         </main>
       </div>
     </div>
