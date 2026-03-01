@@ -149,30 +149,66 @@ export default function InboxPage() {
     if (session?.user) fetchConversations()
   }, [session, status, fetchConversations])
 
-  // Auto-refresh every 15s
+  // Auto-refresh conversation list every 15s (silent — no loading state)
   useEffect(() => {
     const t = setInterval(fetchConversations, 15000)
     return () => clearInterval(t)
   }, [fetchConversations])
 
-  // Open conversation from URL param
+  // Open conversation from URL param — only on first load, not on every list refresh
+  const urlIdHandled = useRef(false)
   useEffect(() => {
+    if (urlIdHandled.current) return
     const id = searchParams.get('id')
     if (id && conversations.length) {
       const conv = conversations.find(c => c.id === id)
-      if (conv) openConversation(conv)
+      if (conv) { openConversation(conv); urlIdHandled.current = true }
     }
-  }, [conversations, searchParams])
+  }, [conversations]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Scroll to bottom when messages change
+  // Poll messages in active conversation every 5s (silent — no loading state)
+  const selectedConvIdRef = useRef<string | null>(null)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [selectedConv?.messages])
+    selectedConvIdRef.current = selectedConv?.id ?? null
+  }, [selectedConv?.id])
+
+  useEffect(() => {
+    const pollMessages = async () => {
+      const id = selectedConvIdRef.current
+      if (!id) return
+      try {
+        const res = await fetch(`/api/inbox/conversations/${id}/messages`)
+        if (!res.ok) return
+        const data = await res.json()
+        setSelectedConv(prev => {
+          if (!prev || prev.id !== id) return prev
+          // Only update if message count changed
+          if (prev.messages.length === data.messages.length) return prev
+          return data
+        })
+      } catch { /* silent */ }
+    }
+    const t = setInterval(pollMessages, 5000)
+    return () => clearInterval(t)
+  }, [])
+
+  // Scroll to bottom only when new messages arrive
+  const prevMsgCount = useRef(0)
+  useEffect(() => {
+    const count = selectedConv?.messages?.length ?? 0
+    if (count > prevMsgCount.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+    prevMsgCount.current = count
+  }, [selectedConv?.messages?.length])
 
   // ── Open conversation ────────────────────────────────────────────────────
 
   const openConversation = async (conv: Conversation) => {
-    setLoadingConv(true)
+    // Show loading only when switching to a different conversation
+    if (selectedConv?.id !== conv.id) {
+      setLoadingConv(true)
+    }
     setShowMobileChat(true)
     try {
       const res = await fetch(`/api/inbox/conversations/${conv.id}/messages`)
@@ -189,20 +225,49 @@ export default function InboxPage() {
 
   const sendReply = async () => {
     if (!replyText.trim() || !selectedConv || sending) return
+    const text = replyText.trim()
     setSending(true)
+    setReplyText('')
+
+    // Optimistically add the message to the UI immediately
+    const optimisticMsg: Message = {
+      id:            `optimistic-${Date.now()}`,
+      content:       text,
+      direction:     'OUTBOUND',
+      channel:       selectedConv.channel,
+      senderType:    'AGENT',
+      senderName:    session?.user?.name ?? 'You',
+      status:        'SENDING',
+      createdAt:     new Date().toISOString(),
+      isAiGenerated: false,
+    }
+    setSelectedConv(prev => prev ? { ...prev, messages: [...prev.messages, optimisticMsg] } : prev)
+
     try {
       const res = await fetch(`/api/inbox/conversations/${selectedConv.id}/reply`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ text: replyText.trim() }),
+        body:    JSON.stringify({ text }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      setReplyText('')
-      // Re-fetch conversation to show new message
-      await openConversation(selectedConv)
-      toast.success('Message sent')
+      // Replace optimistic message with real one
+      setSelectedConv(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          messages: prev.messages.map(m =>
+            m.id === optimisticMsg.id ? { ...data.message, status: 'SENT' } : m
+          ),
+        }
+      })
     } catch (err: any) {
+      // Remove optimistic message on failure
+      setSelectedConv(prev => prev
+        ? { ...prev, messages: prev.messages.filter(m => m.id !== optimisticMsg.id) }
+        : prev
+      )
+      setReplyText(text) // restore text
       toast.error(err.message ?? 'Failed to send message')
     } finally {
       setSending(false)
