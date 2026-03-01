@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 
 const APP_SECRET   = process.env.FACEBOOK_APP_SECRET!
 const VERIFY_TOKEN = process.env.FACEBOOK_WEBHOOK_VERIFY_TOKEN ?? 'aireachout_webhook_verify_2026'
-const PAGE_TOKEN   = process.env.FACEBOOK_PAGE_ACCESS_TOKEN!
+const IG_TOKEN     = process.env.INSTAGRAM_ACCESS_TOKEN!
 const ADMIN_EMAIL  = process.env.SUPER_ADMIN_EMAIL
 
 let _ownerUserId: string | null = null
@@ -86,7 +86,7 @@ async function handleInstagramEvent(event: any) {
   let senderName = `Instagram User ${senderId}`
   try {
     const profileRes = await fetch(
-      `https://graph.facebook.com/v19.0/${senderId}?fields=name,username&access_token=${PAGE_TOKEN}`
+      `https://graph.facebook.com/v19.0/${senderId}?fields=name,username&access_token=${IG_TOKEN}`
     )
     if (profileRes.ok) {
       const profile = await profileRes.json()
@@ -140,8 +140,8 @@ async function handleInstagramEvent(event: any) {
   })
 
   // Mark seen
-  if (PAGE_TOKEN) {
-    fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${PAGE_TOKEN}`, {
+  if (IG_TOKEN) {
+    fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${IG_TOKEN}`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ recipient: { id: senderId }, sender_action: 'mark_seen' }),

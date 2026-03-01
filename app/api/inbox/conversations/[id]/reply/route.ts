@@ -3,12 +3,14 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 
-const FB_PAGE_TOKEN    = process.env.FACEBOOK_PAGE_ACCESS_TOKEN!
-const TELEGRAM_TOKEN   = process.env.TELEGRAM_HUB_BOT_TOKEN
+const FB_PAGE_TOKEN  = process.env.FACEBOOK_PAGE_ACCESS_TOKEN!
+const IG_TOKEN       = process.env.INSTAGRAM_ACCESS_TOKEN!
+const TELEGRAM_TOKEN = process.env.TELEGRAM_HUB_BOT_TOKEN
 
 async function sendMetaMessage(recipientId: string, text: string, channel: 'FACEBOOK' | 'INSTAGRAM') {
+  const token = channel === 'INSTAGRAM' ? IG_TOKEN : FB_PAGE_TOKEN
   const res = await fetch(
-    `https://graph.facebook.com/v19.0/me/messages?access_token=${FB_PAGE_TOKEN}`,
+    `https://graph.facebook.com/v19.0/me/messages?access_token=${token}`,
     {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
