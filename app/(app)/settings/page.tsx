@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PageHeader, pageHeaderConfigs } from '@/components/ui/page-header'
 import { toast } from 'sonner'
-import { Eye, EyeOff, Key, Settings, Trash2, Plus, CheckCircle, XCircle, Phone } from 'lucide-react'
+import { Eye, EyeOff, Key, Settings, Trash2, Plus, CheckCircle, XCircle, Phone, MessageSquare, Copy } from 'lucide-react'
 import { VoiceSettings } from '@/components/ui/voice-settings'
 
 interface ApiKey {
@@ -159,6 +159,7 @@ export default function SettingsPage() {
       }} className="w-full">
         <TabsList>
           <TabsTrigger value="api-keys">API Keys</TabsTrigger>
+          <TabsTrigger value="channels">Channels</TabsTrigger>
           <TabsTrigger value="voice-calls">Voice Calls</TabsTrigger>
           <TabsTrigger value="profile">Profile</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
@@ -296,6 +297,112 @@ export default function SettingsPage() {
                   ))}
                 </div>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="channels" className="space-y-6">
+          {/* Facebook Messenger */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <MessageSquare className="h-5 w-5 text-blue-600" />
+                <span>Facebook Messenger</span>
+                <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 font-medium">Connected</span>
+              </CardTitle>
+              <CardDescription>
+                Receive and reply to messages sent to your Facebook Page via Messenger.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-lg border bg-muted/40 p-4 space-y-3">
+                <p className="text-sm font-medium">Webhook URL — paste this in Meta for Developers</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-xs bg-background border rounded px-3 py-2 font-mono break-all">
+                    https://aireachout.com/api/webhooks/facebook/messenger
+                  </code>
+                  <Button size="sm" variant="outline" onClick={() => {
+                    navigator.clipboard.writeText('https://aireachout.com/api/webhooks/facebook/messenger')
+                    toast.success('Copied!')
+                  }}>
+                    <Copy className="h-3 w-3" />
+                  </Button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground w-28">Verify Token:</span>
+                  <code className="text-xs bg-background border rounded px-3 py-2 font-mono">
+                    aireachout_webhook_verify_2026
+                  </code>
+                  <Button size="sm" variant="outline" onClick={() => {
+                    navigator.clipboard.writeText('aireachout_webhook_verify_2026')
+                    toast.success('Copied!')
+                  }}>
+                    <Copy className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+              <div className="text-sm text-muted-foreground space-y-1">
+                <p>✓ Subscribe to: <strong>messages</strong>, <strong>messaging_postbacks</strong>, <strong>message_reads</strong></p>
+                <p>✓ Page: <strong>AI Reach Out</strong></p>
+                <p>✓ App ID: <strong>1249193620696907</strong></p>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* WhatsApp */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <MessageSquare className="h-5 w-5 text-green-600" />
+                <span>WhatsApp Business</span>
+                <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-yellow-100 text-yellow-700 font-medium">Setup required</span>
+              </CardTitle>
+              <CardDescription>
+                Connect your WhatsApp Business number to receive and reply to customer messages.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                Requires a WhatsApp Business phone number. Go to Meta for Developers → WhatsApp → Getting Started to add a number.
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Instagram */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <MessageSquare className="h-5 w-5 text-pink-600" />
+                <span>Instagram</span>
+                <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-yellow-100 text-yellow-700 font-medium">Setup required</span>
+              </CardTitle>
+              <CardDescription>
+                Receive and reply to Instagram DMs and story mentions.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                Link your Instagram Business account to the AI Reach Out Facebook Page, then configure the Instagram webhook in Meta for Developers.
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Telegram */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <MessageSquare className="h-5 w-5 text-sky-500" />
+                <span>Telegram</span>
+                <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 font-medium">Connected</span>
+              </CardTitle>
+              <CardDescription>
+                Telegram Hub bot forwards all channel messages to your team on Telegram.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                Bot token configured. All inbound messages from connected channels are forwarded to the Telegram Hub.
+              </p>
             </CardContent>
           </Card>
         </TabsContent>
