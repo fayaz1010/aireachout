@@ -7,6 +7,9 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 
 export const metadata: Metadata = {
   title: 'ReachOut AI - Lead Generation & Contact Center Platform',
+  verification: {
+    google: 'GzD3b5MPazhHwEFAcOFEiaTyHQtNXDOi6XfXc7YKVMY',
+  },
   description:
     'AI-powered platform combining outbound lead generation with a unified contact center. Automate outreach, manage conversations, and convert leads across email, SMS, voice, and social.',
   themeColor: '#0C0C14',
