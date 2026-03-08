@@ -50,6 +50,7 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <Providers>{children}</Providers>
+        <Script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1546745079461283" crossOrigin="anonymous" strategy="afterInteractive" />
       </body>
     </html>
   )
