@@ -13,6 +13,7 @@ export const metadata: Metadata = {
   description:
     'AI-powered platform combining outbound lead generation with a unified contact center. Automate outreach, manage conversations, and convert leads across email, SMS, voice, and social.',
   themeColor: '#0C0C14',
+<<<<<<< HEAD
   metadataBase: new URL('https://www.aireachout.com'),
   openGraph: {
     type: 'website',
@@ -35,6 +36,23 @@ export const metadata: Metadata = {
     title: 'ReachOut AI - AI-Powered Lead Generation',
     description: 'Automate outbound outreach and convert more leads with AI.',
     images: ['https://www.aireachout.com/og-image.png'],
+=======
+  icons: { icon: '/favicon.ico' },
+  openGraph: {
+    type: 'website',
+    locale: 'en_US',
+    url: 'https://aireachout.com',
+    siteName: 'ReachOut AI',
+    title: 'ReachOut AI — Lead Generation & Contact Center Platform',
+    description: 'AI-powered platform combining outbound lead generation with a unified contact center.',
+  },
+  alternates: {
+    canonical: 'https://aireachout.com',
+  },
+  robots: {
+    index: true,
+    follow: true,
+>>>>>>> 5d943d5 (fix: add security headers and meta tags)
   },
 }
 
